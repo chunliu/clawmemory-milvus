@@ -1,74 +1,19 @@
-# clawmemory-milvus
+# @openclaw/memory-milvus
 
-Milvus-based memory backend for OpenClaw.
-
-## Overview
-
-This plugin provides a Milvus vector database backend for OpenClaw's memory system, enabling semantic search over Markdown-based memory files with large-scale vector retrieval capabilities.
+Milvus-based memory backend for OpenClaw, providing long-term semantic memory with vector search.
 
 ## Features
 
 - **Vector-based semantic search**: Find related memories even when wording differs
 - **Large-scale storage**: Handle millions of memory vectors with Milvus
-- **Hybrid queries**: Combine vector similarity with metadata filters
-- **Markdown-first**: Original Markdown files remain the source of truth
-- **Drop-in replacement**: Compatible with OpenClaw's existing memory tools (`memory_search`, `memory_get`)
-
-## Architecture
-
-```
-Markdown Files (MEMORY.md, memory/*.md)
-    ↓
-Chunking + Embedding
-    ↓
-Milvus Vector Database
-    ↓
-Semantic Search (memory_search)
-```
+- **Auto-recall**: Automatically inject relevant memories into context
+- **Auto-capture**: Automatically capture important information from conversations
+- **Drop-in replacement**: Compatible with OpenClaw's memory system
 
 ## Installation
 
 ```bash
-# Clone this repository
-git clone https://github.com/chunliu/clawmemory-milvus.git
-cd clawmemory-milvus
-
-# Install dependencies
-npm install
-
-# Build
-npm run build
-```
-
-## Configuration
-
-Add to your OpenClaw config:
-
-```json5
-{
-  memory: {
-    backend: "milvus",
-    milvus: {
-      host: "localhost",
-      port: 19530,
-      collection: "openclaw_memory",
-      embedding: {
-        provider: "openai",
-        model: "text-embedding-3-small",
-        dimension: 1536
-      },
-      sync: {
-        watch: true,
-        interval: "5m",
-        debounceMs: 1500
-      },
-      search: {
-        topK: 10,
-        metricType: "COSINE"
-      }
-    }
-  }
-}
+npm install @openclaw/memory-milvus
 ```
 
 ## Milvus Setup
@@ -93,7 +38,7 @@ services:
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
       - ETCD_AUTO_COMPACTION_RETENTION=1000
-      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETQUOTA_BACKEND_BYTES=4294967296
     volumes:
       - etcd:/etcd
     command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
@@ -119,13 +64,13 @@ services:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
     volumes:
-      - milvus:/var/lib/milvus
+      - milvus:/var/lib/mariadb
     ports:
       - "19530:19530"
       - "9091:9091"
     depends_on:
       - "etcd"
-      - "minio"
+      - - "minio"
 
 volumes:
   etcd:
@@ -133,17 +78,110 @@ volumes:
   milvus:
 ```
 
+## Configuration
+
+Add to your OpenClaw config:
+
+```json5
+{
+  "plugins": {
+    "memory-milvus": {
+      "embedding": {
+        "apiKey": "${OPENAI_API_KEY}",
+        "model": "text-embedding-3-small",
+        "baseUrl": "https://api.openai.com/v1"
+      },
+      "milvus": {
+        "host": "localhost",
+        "port": 19530,
+        "collection": "openclaw_memory"
+      },
+      "autoCapture": true,
+      "autoRecall": true,
+      "captureMaxChars": 500
+    }
+  }
+}
+```
+
+## Tools
+
+### memory_recall
+
+Search through long-term memories.
+
+```json
+{
+  "query": "What are my preferences?",
+  "limit": 5
+}
+```
+
+### memory_store
+
+Save important information in long-term memory.
+
+```json
+{
+  "text": "I prefer dark mode in all apps",
+  "importance": 0.8,
+  "category": "preference"
+}
+```
+
+### memory_forget
+
+Delete specific memories.
+
+```json
+{
+  "query": "dark mode"
+}
+```
+
+Or by ID:
+
+```json
+{
+  "memoryId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+## CLI Commands
+
+```bash
+# List all memories
+openclaw milvus-mem list
+
+# Search memories
+openclaw milvus-mem search "my preferences" --limit 5
+
+# Show statistics
+openclaw milvus-mem stats
+```
+
+## Memory Categories
+
+- `preference`: User preferences and likes/dislikes
+- `decision`: Past decisions and choices
+- `entity`: Names, emails, phone numbers
+- `fact`: General facts and information
+- `other`: Everything else
+
 ## Development
 
 ```bash
-# Run tests
-npm test
+# Install dependencies
+npm install
+
+# Build
+npm run build
 
 # Watch mode
 npm run dev
 
-# Lint
-npm run lint
+# Run tests
+npm test
 ```
 
 ## License
