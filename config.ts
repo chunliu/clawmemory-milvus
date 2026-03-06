@@ -24,11 +24,13 @@ export type MemoryCategory = (typeof MEMORY_CATEGORIES)[number];
 // Types
 // ============================================================================
 
+export type EmbeddingProvider = "openai" | "ollama" | "custom";
+
 export type MemoryConfig = {
   embedding: {
-    provider: "openai";
+    provider: EmbeddingProvider;
     model: string;
-    apiKey: string;
+    apiKey?: string;
     baseUrl?: string;
     dimensions?: number;
   };
@@ -47,15 +49,24 @@ export type MemoryConfig = {
 // ============================================================================
 
 const EMBEDDING_DIMENSIONS: Record<string, number> = {
+  // OpenAI models
   "text-embedding-3-small": 1536,
   "text-embedding-3-large": 3072,
   "text-embedding-ada-002": 1536,
+  // Ollama models (common defaults)
+  "nomic-embed-text": 768,
+  "mxbai-embed-large": 1024,
+  "all-minilm": 384,
+  "llama3": 4096,
+  "mistral": 1024,
 };
 
 export function vectorDimsForModel(model: string): number {
   const dims = EMBEDDING_DIMENSIONS[model];
   if (!dims) {
-    throw new Error(`Unsupported embedding model: ${model}`);
+    // For unknown models, return a common default
+    // User should specify dimensions explicitly for custom models
+    return 1536;
   }
   return dims;
 }
@@ -70,12 +81,36 @@ function resolveEnvVars(value: string): string {
   });
 }
 
+function resolveEmbeddingProvider(provider: unknown): EmbeddingProvider {
+  if (typeof provider === "string") {
+    if (provider === "openai" || provider === "ollama" || provider === "custom") {
+      return provider as EmbeddingProvider;
+    }
+  }
+  return "openai"; // Default
+}
+
 function resolveEmbeddingModel(embedding: Record<string, unknown>): string {
   const model = typeof embedding.model === "string" ? embedding.model : DEFAULT_EMBEDDING_MODEL;
-  if (typeof embedding.dimensions !== "number") {
-    vectorDimsForModel(model);
-  }
   return model;
+}
+
+function resolveEmbeddingBaseUrl(embedding: Record<string, unknown>, provider: EmbeddingProvider): string {
+  // If baseUrl is explicitly provided, use it
+  if (typeof embedding.baseUrl === "string") {
+    return resolveEnvVars(embedding.baseUrl);
+  }
+
+  // Default URLs based on provider
+  switch (provider) {
+    case "ollama":
+      return "http://localhost:11434/v1";
+    case "custom":
+      return "http://localhost:11434/v1";
+    case "openai":
+    default:
+      return "https://api.openai.com/v1";
+  }
 }
 
 function assertAllowedKeys(value: Record<string, unknown>, allowed: string[], label: string) {
@@ -103,12 +138,18 @@ export const memoryConfigSchema = {
     );
 
     const embedding = cfg.embedding as Record<string, unknown> | undefined;
-    if (!embedding || typeof embedding.apiKey !== "string") {
-      throw new Error("embedding.apiKey is required");
+    if (!embedding) {
+      throw new Error("embedding config is required");
     }
-    assertAllowedKeys(embedding, ["apiKey", "model", "baseUrl", "dimensions"], "embedding config");
+    assertAllowedKeys(embedding, ["provider", "model", "apiKey", "baseUrl", "dimensions"], "embedding config");
 
+    const provider = resolveEmbeddingProvider(embedding.provider);
     const model = resolveEmbeddingModel(embedding);
+
+    // For OpenAI, apiKey is required
+    if (provider === "openai" && typeof embedding.apiKey !== "string") {
+      throw new Error("embedding.apiKey is required for OpenAI provider");
+    }
 
     // Validate milvus config if present
     if (cfg.milvus) {
@@ -127,11 +168,10 @@ export const memoryConfigSchema = {
 
     return {
       embedding: {
-        provider: "openai",
+        provider,
         model,
-        apiKey: resolveEnvVars(embedding.apiKey),
-        baseUrl:
-          typeof embedding.baseUrl === "string" ? resolveEnvVars(embedding.baseUrl) : undefined,
+        apiKey: typeof embedding.apiKey === "string" ? resolveEnvVars(embedding.apiKey) : undefined,
+        baseUrl: resolveEmbeddingBaseUrl(embedding, provider),
         dimensions: typeof embedding.dimensions === "number" ? embedding.dimensions : undefined,
       },
       milvus: cfg.milvus as MemoryConfig["milvus"],
@@ -141,27 +181,32 @@ export const memoryConfigSchema = {
     };
   },
   uiHints: {
+    "embedding.provider": {
+      label: "Embedding Provider",
+      help: "Provider for embeddings (openai, ollama, custom)",
+      placeholder: "openai",
+    },
     "embedding.apiKey": {
-      label: "OpenAI API Key",
+      label: "API Key",
       sensitive: true,
       placeholder: "sk-proj-...",
-      help: "API key for OpenAI embeddings (or use ${OPENAI_API_KEY})",
+      help: "API key for OpenAI embeddings (required for openai provider)",
     },
     "embedding.model": {
       label: "Embedding Model",
       placeholder: DEFAULT_EMBEDDING_MODEL,
-      help: "OpenAI embedding model to use",
+      help: "Model name (e.g., text-embedding-3-small, nomic-embed-text)",
     },
     "embedding.baseUrl": {
       label: "Base URL",
       placeholder: "https://api.openai.com/v1",
-      help: "Base URL for compatible providers (e.g. http://localhost:11434/v1)",
+      help: "Base URL for embeddings API (default varies by provider)",
       advanced: true,
     },
     "embedding.dimensions": {
       label: "Dimensions",
       placeholder: "1536",
-      help: "Vector dimensions for custom models (required for non-standard models)",
+      help: "Vector dimensions (required for custom models)",
       advanced: true,
     },
     "milvus.host": {

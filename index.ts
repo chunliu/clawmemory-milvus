@@ -2,7 +2,7 @@
  * OpenClaw Memory (Milvus) Plugin
  *
  * Long-term memory with vector search for AI conversations.
- * Uses Milvus for storage and OpenAI for embeddings.
+ * Uses Milvus for storage and OpenAI/Ollama/Custom for embeddings.
  * Provides seamless auto-recall and auto-capture via lifecycle hooks.
  */
 
@@ -21,6 +21,7 @@ import {
   DEFAULT_MILVUS_PORT,
   DEFAULT_COLLECTION_NAME,
   DEFAULT_EMBEDDING_MODEL,
+  type EmbeddingProvider,
 } from "./config.js";
 
 // ============================================================================
@@ -109,7 +110,7 @@ class MemoryDB {
         name: "id",
         description: "Memory ID",
         data_type: DataType.VarChar,
-        max_length: 36
+        max_length: 36,
         is_primary_key: true,
         autoID: false,
       },
@@ -240,19 +241,24 @@ class MemoryDB {
 }
 
 // ============================================================================
-// OpenAI Embeddings
+// Embeddings Provider (OpenAI, Ollama, Custom)
 // ============================================================================
 
 class Embeddings {
   private client: OpenAI;
+  private provider: EmbeddingProvider;
 
   constructor(
-    apiKey: string,
+    provider: EmbeddingProvider,
+    apiKey: string | undefined,
     private model: string,
-    baseUrl?: string,
+    baseUrl: string,
     private dimensions?: number,
   ) {
-    this.client = new OpenAI({ apiKey, baseURL: baseUrl });
+    this.provider = provider;
+    // For Ollama and custom, apiKey can be "dummy" or undefined
+    const effectiveApiKey = apiKey || "dummy";
+    this.client = new OpenAI({ apiKey: effectiveApiKey, baseURL: baseUrl });
   }
 
   async embed(text: string): Promise<number[]> {
@@ -260,9 +266,12 @@ class Embeddings {
       model: this.model,
       input: text,
     };
-    if (this.dimensions) {
+
+    // Only add dimensions parameter for OpenAI
+    if (this.provider === "openai" && this.dimensions) {
       params.dimensions = this.dimensions;
     }
+
     const response = await this.client.embeddings.create(params);
     return response.data[0].embedding;
   }
@@ -385,13 +394,21 @@ const memoryPlugin = {
     const milvusHost = cfg.milvus?.host ?? DEFAULT_MILVUS_HOST;
     const milvusPort = cfg.milvus?.port ?? DEFAULT_MILVUS_PORT;
     const collectionName = cfg.milvus?.collection ?? DEFAULT_COLLECTION_NAME;
-    const { model, dimensions, apiKey, baseUrl } = cfg.embedding;
+    const { provider, model, apiKey, baseUrl, dimensions } = cfg.embedding;
 
     const vectorDim = dimensions ?? vectorDimsForModel(model ?? DEFAULT_EMBEDDING_MODEL);
     const db = new MemoryDB(milvusHost, milvusPort, collectionName, vectorDim);
-    const embeddings = new Embeddings(apiKey, model ?? DEFAULT_EMBEDDING_MODEL, baseUrl, dimensions);
+    const embeddings = new Embeddings(
+      provider,
+      apiKey,
+      model ?? DEFAULT_EMBEDDING_MODEL,
+      baseUrl!,
+      dimensions,
+    );
 
-    api.logger.info(`memory-milvus: plugin registered (milvus: ${milvusHost}:${milvusPort}, collection: ${collectionName}, lazy init)`);
+    api.logger.info(
+      `memory-milvus: plugin registered (provider: ${provider}, model: ${model}, milvus: ${milvusHost}:${milvusPort}, collection: ${collectionName}, lazy init)`,
+    );
 
     // ========================================================================
     // Tools
@@ -553,7 +570,7 @@ const memoryPlugin = {
             const sanitizedCandidates = results.map((r) => ({
               id: r.entry.id,
               text: r.entry.text,
-              category: r.entry.category,
+              category:              r.entry.category,
               score: r.score,
             }));
 
@@ -579,7 +596,8 @@ const memoryPlugin = {
 
     // ========================================================================
     // CLI Commands
-    // =================================================================
+    // ========================================================================
+
     api.registerCli(
       ({ program }) => {
         const memory = program.command("milvus-mem").description("Milvus memory plugin commands");
@@ -747,7 +765,7 @@ const memoryPlugin = {
       id: "memory-milvus",
       start: () => {
         api.logger.info(
-          `memory-milvus: initialized (milvus: ${milvusHost}:${milvusPort}, collection: ${collectionName}, model: ${cfg.embedding.model})`,
+          `memory-milvus: initialized (provider: ${provider}, model: ${model}, milvus: ${milvusHost}:${milvusPort}, collection: ${collectionName})`,
         );
       },
       stop: () => {
