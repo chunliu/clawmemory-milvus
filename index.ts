@@ -262,7 +262,15 @@ class MemoryDB {
     const stats = await this.client.getCollectionStatistics({
       collection_name: this.collectionName,
     });
-    return parseInt(stats.row_count, 10);
+    const rowCount = stats.row_count;
+    // Handle different types: string, number, or undefined
+    if (typeof rowCount === "number") {
+      return rowCount;
+    }
+    if (typeof rowCount === "string") {
+      return parseInt(rowCount, 10);
+    }
+    return 0;
   }
 }
 
