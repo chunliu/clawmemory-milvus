@@ -59,6 +59,7 @@ const EMBEDDING_DIMENSIONS: Record<string, number> = {
   "all-minilm": 384,
   "llama3": 4096,
   "mistral": 1024,
+  "qwen3-embed": 1024,
 };
 
 export function vectorDimsForModel(model: string): number {

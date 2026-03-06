@@ -128,6 +128,52 @@ volumes:
 }
 ```
 
+#### Using Qwen3-Embedding-0.6B
+
+First, download the GGUF model from HuggingFace and create an Ollama model:
+
+```bash
+# Download the GGUF file
+curl -L -o Qwen3-Embedding-0.6B-f16.gguf \
+  "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-f16.gguf"
+
+# Create a Modelfile
+cat > Modelfile << 'EOF'
+FROM ./Qwen3-Embedding-0.6B-f16.gguf
+PARAMETER num_ctx 2048
+PARAMETER num_batch 512
+TEMPLATE """
+{{ .Prompt }}
+"""
+EOF
+
+# Create the Ollama model
+ollama create qwen3-embed -f Modelfile
+```
+
+Then configure the plugin:
+
+```json5
+{
+  "plugins": {
+    "memory-milvus": {
+      "embedding": {
+        "provider": "ollama",
+        "model": "qwen3-embed",
+        "baseUrl": "http://localhost:11434/v1"
+      },
+      "milvus": {
+        "host": "localhost",
+        "port": 19530,
+        "collection": "openclaw_memory"
+      },
+      "autoCapture": true,
+      "autoRecall": true
+    }
+  }
+}
+```
+
 ### Using Custom Provider
 
 ```json5
