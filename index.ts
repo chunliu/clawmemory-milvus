@@ -108,9 +108,21 @@ class MemoryDB {
     }
 
     // Load collection into memory
-    await this.client.loadCollection({
-      collection_name: this.collectionName,
-    });
+    try {
+      await this.client.loadCollection({
+        collection_name: this.collectionName,
+      });
+    } catch (error: any) {
+      // If collection doesn't exist, create it and try again
+      if (error.message && error.message.includes("CollectionNotExists")) {
+        await this.createCollection();
+        await this.client.loadCollection({
+          collection_name: this.collectionName,
+        });
+      } else {
+        throw error;
+      }
+    }
   }
 
   private async createCollection(): Promise<void> {
