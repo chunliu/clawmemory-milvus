@@ -262,7 +262,8 @@ class MemoryDB {
     const stats = await this.client.getCollectionStatistics({
       collection_name: this.collectionName,
     });
-    const rowCount = stats.row_count;
+    // Milvus returns stats in data property
+    const rowCount = stats.data?.row_count;
     // Handle different types: string, number, or undefined
     if (typeof rowCount === "number") {
       return rowCount;
