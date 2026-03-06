@@ -28,7 +28,7 @@ import {
 // ============================================================================
 
 let milvusImportPromise: Promise<typeof import("@zilliz/milvus2-sdk-node")> | null = null;
-const loadMilvus = async (): Promise<typeof import("@zilliz/milvus2-sdk-node")> {
+const loadMilvus = async (): Promise<typeof import("@zilliz/milvus2-sdk-node")> => {
   if (!milvusImportPromise) {
     milvusImportPromise = import("@zilliz/milvus2-sdk-node");
   }
@@ -109,7 +109,7 @@ class MemoryDB {
         name: "id",
         description: "Memory ID",
         data_type: DataType.VarChar,
-        max_length: 36,
+        max_length: 36
         is_primary_key: true,
         autoID: false,
       },
@@ -168,16 +168,19 @@ class MemoryDB {
       createdAt: Date.now(),
     };
 
+    // Milvus requires columnar format for insert
     await this.client.insert({
       collection_name: this.collectionName,
-      data: {
-        ids: [fullEntry.id],
-        texts: [fullEntry.text],
-        vectors: [fullEntry.vector],
-        importances: [fullEntry.importance],
-        categories: [fullEntry.category],
-        createdAts: [fullEntry.createdAt],
-      },
+      data: [
+        {
+          id: fullEntry.id,
+          text: fullEntry.text,
+          vector: fullEntry.vector,
+          importance: fullEntry.importance,
+          category: fullEntry.category,
+          createdAt: fullEntry.createdAt,
+        },
+      ],
     });
 
     await this.client.flush({
@@ -200,7 +203,7 @@ class MemoryDB {
     // Milvus returns cosine similarity directly (higher = more similar)
     const mapped = results.results[0].map((result: any) => ({
       entry: {
-        id: result.id,
+        id: result.id.id,
         text: result.entity.text,
         vector: [], // Not returned by search
         importance: result.entity.importance,
@@ -571,13 +574,12 @@ const memoryPlugin = {
           };
         },
       },
-      { name: "memoryForger" },
+      { name: "memory_forget" },
     );
 
     // ========================================================================
     // CLI Commands
-    // ========================================================================
-
+    // =================================================================
     api.registerCli(
       ({ program }) => {
         const memory = program.command("milvus-mem").description("Milvus memory plugin commands");
@@ -659,13 +661,16 @@ const memoryPlugin = {
         }
 
         try {
+          // Extract text content from messages (handling unknown[] type)
           const texts: string[] = [];
           for (const msg of event.messages) {
+            // Type guard for message object
             if (!msg || typeof msg !== "object") {
               continue;
             }
             const msgObj = msg as Record<string, unknown>;
 
+            // Only process user messages to avoid self-poisoning from model output
             const role = msgObj.role;
             if (role !== "user") {
               continue;
@@ -673,11 +678,13 @@ const memoryPlugin = {
 
             const content = msgObj.content;
 
+            // Handle string content directly
             if (typeof content === "string") {
               texts.push(content);
               continue;
             }
 
+            // Handle array content (content blocks)
             if (Array.isArray(content)) {
               for (const block of content) {
                 if (
@@ -694,6 +701,7 @@ const memoryPlugin = {
             }
           }
 
+          // Filter for capturable content
           const toCapture = texts.filter(
             (text) => text && shouldCapture(text, { maxChars: cfg.captureMaxChars }),
           );
@@ -701,11 +709,13 @@ const memoryPlugin = {
             return;
           }
 
+          // Store each capturable piece (limit to 3 per conversation)
           let stored = 0;
           for (const text of toCapture.slice(0, 3)) {
             const category = detectCategory(text);
             const vector = await embeddings.embed(text);
 
+            // Check for duplicates (high similarity threshold)
             const existing = await db.search(vector, 1, 0.95);
             if (existing.length > 0) {
               continue;
