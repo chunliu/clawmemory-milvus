@@ -67,6 +67,8 @@ class MemoryDB {
     private readonly port: number,
     collectionName: string,
     vectorDim: number,
+    private readonly username?: string,
+    private readonly password?: string,
   ) {
     this.collectionName = collectionName;
     this.vectorDim = vectorDim;
@@ -87,7 +89,14 @@ class MemoryDB {
   private async doInitialize(): Promise<void> {
     const { MilvusClient } = await loadMilvus();
     const address = `${this.host}:${this.port}`;
-    this.client = new MilvusClient({ address });
+    
+    const clientConfig: any = { address };
+    if (this.username && this.password) {
+      clientConfig.username = this.username;
+      clientConfig.password = this.password;
+    }
+    
+    this.client = new MilvusClient(clientConfig);
 
     // Check if collection exists
     const hasCollection = await this.client.hasCollection({
@@ -397,7 +406,14 @@ const memoryPlugin = {
     const { provider, model, apiKey, baseUrl, dimensions } = cfg.embedding;
 
     const vectorDim = dimensions ?? vectorDimsForModel(model ?? DEFAULT_EMBEDDING_MODEL);
-    const db = new MemoryDB(milvusHost, milvusPort, collectionName, vectorDim);
+    const db = new MemoryDB(
+      milvusHost,
+      milvusPort,
+      collectionName,
+      vectorDim,
+      cfg.milvus?.username,
+      cfg.milvus?.password,
+    );
     const embeddings = new Embeddings(
       provider,
       apiKey,

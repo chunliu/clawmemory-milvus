@@ -38,6 +38,8 @@ export type MemoryConfig = {
     host?: string;
     port?: number;
     collection?: string;
+    username?: string;
+    password?: string;
   };
   autoCapture?: boolean;
   autoRecall?: boolean;

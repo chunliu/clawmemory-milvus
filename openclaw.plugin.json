@@ -90,6 +90,12 @@
           },
           "collection": {
             "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
           }
         }
       },
