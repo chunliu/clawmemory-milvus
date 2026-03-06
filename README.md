@@ -8,6 +8,7 @@ Milvus-based memory backend for OpenClaw, providing long-term semantic memory wi
 - **Large-scale storage**: Handle millions of memory vectors with Milvus
 - **Auto-recall**: Automatically inject relevant memories into context
 - **Auto-capture**: Automatically capture important information from conversations
+- **Multiple embedding providers**: Support for OpenAI, Ollama, and custom providers
 - **Drop-in replacement**: Compatible with OpenClaw's memory system
 
 ## Installation
@@ -33,7 +34,7 @@ docker run -d --name milvus-standalone \
 version: '3.5'
 
 services:
-  etcd:
+  etetcd:
     image: quay.io/coreos/etcd:latest
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
@@ -70,7 +71,7 @@ services:
       - "9091:9091"
     depends_on:
       - "etcd"
-      - - "minio"
+      - "minio"
 
 volumes:
   etcd:
@@ -80,16 +81,16 @@ volumes:
 
 ## Configuration
 
-Add to your OpenClaw config:
+### Using OpenAI Embeddings
 
 ```json5
 {
   "plugins": {
     "memory-milvus": {
       "embedding": {
+        "provider": "openai",
         "apiKey": "${OPENAI_API_KEY}",
-        "model": "text-embedding-3-small",
-        "baseUrl": "https://api.openai.com/v1"
+        "model": "text-embedding-3-small"
       },
       "milvus": {
         "host": "localhost",
@@ -103,6 +104,91 @@ Add to your OpenClaw config:
   }
 }
 ```
+
+### Using Ollama (Local)
+
+```json5
+{
+  "plugins": {
+    "memory-milvus": {
+      "embedding": {
+        "provider": "ollama",
+        "model": "nomic-embed-text",
+        "baseUrl": "http://localhost:11434/v1"
+      },
+      "milvus": {
+        "host": "localhost",
+        "port": 19530,
+        "collection": "openclaw_memory"
+      },
+      "autoCapture": true,
+      "autoRecall": true
+    }
+  }
+}
+```
+
+### Using Custom Provider
+
+```json5
+{
+  "plugins": {
+    "memory-milvus": {
+      "embedding": {
+        "provider": "custom",
+        "model": "your-model-name",
+        "baseUrl": "http://your-host:port/v1",
+        "dimensions": 768
+      },
+      "milvus": {
+        "host": "localhost",
+        "port": 19530,
+        "collection": "openclaw_memory"
+      },
+      "autoCapture": true,
+      "autoRecall": true
+    }
+  }
+}
+```
+
+## Embedding Providers
+
+### OpenAI
+
+- **Provider**: `openai`
+- **Required**: `apiKey`
+- **Default baseUrl**: `https://api.openai.com/v1`
+- **Supported models**: `text-embedding-3-small`, `text-embedding-3-large`, `text-embedding-ada-002`
+
+### Ollama
+
+- **Provider**: `ollama`
+- **Required**: None (runs locally)
+- **Default baseUrl**: `http://localhost:11434/v1`
+- **Common models**: `nomic-embed-text`, `mxbai-embed-large`, `all-minilm`, `llama3`, `mistral`
+
+**Setup Oll**ama**:
+
+```bash
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Pull an embedding model
+ollama pull nomic-embed-text
+
+# Verify it works
+curl http://localhost:11434/api/generate -d '{
+  "model": "nomic-embed-text",
+  "prompt": "Hello, world!"
+}'
+```
+
+### Custom
+
+- **Provider**: `custom`
+- **Required**: `baseUrl`, `dimensions`
+- **Use case**: Any OpenAI-compatible embedding API
 
 ## Tools
 
