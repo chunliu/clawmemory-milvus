@@ -157,7 +157,7 @@ export const memoryConfigSchema = {
     // Validate milvus config if present
     if (cfg.milvus) {
       const milvus = cfg.milvus as Record<string, unknown>;
-      assertAllowedKeys(milvus, ["host", "port", "collection"], "milvus config");
+      assertAllowedKeys(milvus, ["host", "port", "collection", "username", "password"], "milvus config");
     }
 
     const captureMaxChars =
