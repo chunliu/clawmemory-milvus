@@ -222,17 +222,22 @@ class MemoryDB {
       output_fields: ["text", "importance", "category", "createdAt"],
     });
 
+    // Handle different response formats from Milvus
+    if (!results || !results.results || !results.results[0]) {
+      return [];
+    }
+
     // Milvus returns cosine similarity directly (higher = more similar)
     const mapped = results.results[0].map((result: any) => ({
       entry: {
-        id: result.id.id,
-        text: result.entity.text,
+        id: result.id?.id || result.id,
+        text: result.entity?.text || "",
         vector: [], // Not returned by search
-        importance: result.entity.importance,
-        category: result.entity.category,
-        createdAt: result.entity.createdAt,
+        importance: result.entity?.importance || 0,
+        category: result.entity?.category || "other",
+        createdAt: result.entity?.createdAt || Date.now(),
       },
-      score: result.score,
+      score: result.score || 0,
     }));
 
     return mapped.filter((r) => r.score >= minScore);
