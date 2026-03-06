@@ -223,19 +223,19 @@ class MemoryDB {
     });
 
     // Handle different response formats from Milvus
-    if (!results || !results.results || !results.results[0]) {
+    if (!results || !results.results || results.results.length === 0) {
       return [];
     }
 
-    // Milvus returns cosine similarity directly (higher = more similar)
-    const mapped = results.results[0].map((result: any) => ({
+    // Milvus returns results as an array directly
+    const mapped = results.results.map((result: any) => ({
       entry: {
-        id: result.id?.id || result.id,
-        text: result.entity?.text || "",
+        id: result.id,
+        text: result.text || "",
         vector: [], // Not returned by search
-        importance: result.entity?.importance || 0,
-        category: result.entity?.category || "other",
-        createdAt: result.entity?.createdAt || Date.now(),
+        importance: result.importance || 0,
+        category: result.category || "other",
+        createdAt: result.createdAt || Date.now(),
       },
       score: result.score || 0,
     }));
