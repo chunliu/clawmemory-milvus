@@ -4,12 +4,11 @@
  * Long-term memory with vector search for AI conversations.
  * Uses Milvus for storage and OpenAI/Ollama/Custom for embeddings.
  * Provides seamless auto-recall and auto-capture via lifecycle hooks.
+ *
+ * Now supports both plugin layer (memory_recall/store/forget) and core layer (memory_search/get).
  */
 
-import { randomUUID } from "node:crypto";
-import { DataType } from "@zilliz/milvus2-sdk-node";
 import { Type } from "@sinclair/typebox";
-import OpenAI from "openai";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import {
   DEFAULT_CAPTURE_MAX_CHARS,
@@ -22,295 +21,21 @@ import {
   DEFAULT_COLLECTION_NAME,
   DEFAULT_EMBEDDING_MODEL,
   type EmbeddingProvider,
+  type MemoryConfig,
 } from "./config.js";
+import { MemoryDB, type ConversationMemoryEntry } from "./milvus-provider.js";
+import { Embeddings } from "./embeddings.js";
+import { FileIndexer } from "./file-indexer.js";
+import { createMemorySearchTool, createMemoryGetTool } from "./core-tools.js";
 
 // ============================================================================
 // Types
 // ============================================================================
 
-let milvusImportPromise: Promise<typeof import("@zilliz/milvus2-sdk-node")> | null = null;
-const loadMilvus = async (): Promise<typeof import("@zilliz/milvus2-sdk-node")> => {
-  if (!milvusImportPromise) {
-    milvusImportPromise = import("@zilliz/milvus2-sdk-node");
-  }
-  return await milvusImportPromise;
-};
-
-type MemoryEntry = {
-  id: string;
-  text: string;
-  vector: number[];
-  importance: number;
-  category: MemoryCategory;
-  createdAt: number;
-};
-
 type MemorySearchResult = {
-  entry: MemoryEntry;
+  entry: ConversationMemoryEntry;
   score: number;
 };
-
-// ============================================================================
-// Milvus Provider
-// ============================================================================
-
-const TABLE_NAME = "memories";
-
-class MemoryDB {
-  private client: any = null; // MilvusClient
-  private collectionName: string;
-  private vectorDim: number;
-  private initPromise: Promise<void> | null = null;
-
-  constructor(
-    private readonly host: string,
-    private readonly port: number,
-    collectionName: string,
-    vectorDim: number,
-    private readonly username?: string,
-    private readonly password?: string,
-  ) {
-    this.collectionName = collectionName;
-    this.vectorDim = vectorDim;
-  }
-
-  private async ensureInitialized(): Promise<void> {
-    if (this.client) {
-      return;
-    }
-    if (this.initPromise) {
-      return this.initPromise;
-    }
-
-    this.initPromise = this.doInitialize();
-    return this.initPromise;
-  }
-
-  private async doInitialize(): Promise<void> {
-    const { MilvusClient } = await loadMilvus();
-    const address = `${this.host}:${this.port}`;
-    
-    const clientConfig: any = { address };
-    if (this.username && this.password) {
-      clientConfig.username = this.username;
-      clientConfig.password = this.password;
-    }
-    
-    this.client = new MilvusClient(clientConfig);
-
-    // Check if collection exists
-    const hasCollection = await this.client.hasCollection({
-      collection_name: this.collectionName,
-    });
-
-    if (!hasCollection) {
-      await this.createCollection();
-    }
-
-    // Load collection into memory
-    try {
-      await this.client.loadCollection({
-        collection_name: this.collectionName,
-      });
-    } catch (error: any) {
-      // If collection doesn't exist, create it and try again
-      if (error.message && error.message.includes("CollectionNotExists")) {
-        await this.createCollection();
-        await this.client.loadCollection({
-          collection_name: this.collectionName,
-        });
-      } else {
-        throw error;
-      }
-    }
-  }
-
-  private async createCollection(): Promise<void> {
-    const schema = [
-      {
-        name: "id",
-        description: "Memory ID",
-        data_type: DataType.VarChar,
-        max_length: 36,
-        is_primary_key: true,
-        autoID: false,
-      },
-      {
-        name: "text",
-        description: "Memory text",
-        data_type: DataType.VarChar,
-        max_length: 65535,
-      },
-      {
-        name: "vector",
-        description: "Embedding vector",
-        data_type: DataType.FloatVector,
-        dim: this.vectorDim,
-      },
-      {
-        name: "importance",
-        description: "Importance score",
-        data_type: DataType.Float,
-      },
-      {
-        name: "category",
-        description: "Memory category",
-        data_type: DataType.VarChar,
-        max_length: 20,
-      },
-      {
-        name: "createdAt",
-        description: "Creation timestamp",
-        data_type: DataType.Int64,
-      },
-    ];
-
-    await this.client.createCollection({
-      collection_name: this.collectionName,
-      fields: schema,
-      enable_dynamic_field: true,
-    });
-
-    // Create index for vector field
-    await this.client.createIndex({
-      collection_name: this.collectionName,
-      field_name: "vector",
-      index_type: "IVF_FLAT",
-      metric_type: "COSINE",
-      params: { nlist: 128 },
-    });
-  }
-
-  async store(entry: Omit<MemoryEntry, "id" | "createdAt">): Promise<MemoryEntry> {
-    await this.ensureInitialized();
-
-    const fullEntry: MemoryEntry = {
-      ...entry,
-      id: randomUUID(),
-      createdAt: Date.now(),
-    };
-
-    // Milvus requires columnar format for insert
-    await this.client.insert({
-      collection_name: this.collectionName,
-      data: [
-        {
-          id: fullEntry.id,
-          text: fullEntry.text,
-          vector: fullEntry.vector,
-          importance: fullEntry.importance,
-          category: fullEntry.category,
-          createdAt: fullEntry.createdAt,
-        },
-      ],
-    });
-
-    await this.client.flush({
-      collection_names: [this.collectionName],
-    });
-
-    return fullEntry;
-  }
-
-  async search(vector: number[], limit = 5, minScore = 0.5): Promise<MemorySearchResult[]> {
-    await this.ensureInitialized();
-
-    const results = await this.client.search({
-      collection_name: this.collectionName,
-      data: [vector],
-      limit,
-      output_fields: ["text", "importance", "category", "createdAt"],
-    });
-
-    // Handle different response formats from Milvus
-    if (!results || !results.results || results.results.length === 0) {
-      return [];
-    }
-
-    // Milvus returns results as an array directly
-    const mapped = results.results.map((result: any) => ({
-      entry: {
-        id: result.id,
-        text: result.text || "",
-        vector: [], // Not returned by search
-        importance: result.importance || 0,
-        category: result.category || "other",
-        createdAt: result.createdAt || Date.now(),
-      },
-      score: result.score || 0,
-    }));
-
-    return mapped.filter((r) => r.score >= minScore);
-  }
-
-  async delete(id: string): Promise<boolean> {
-    await this.ensureInitialized();
-    // Validate UUID format to prevent injection
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(id)) {
-      throw new Error(`Invalid memory ID format: ${id}`);
-    }
-    await this.client.delete({
-      collection_name: this.collectionName,
-      expr: `id == "${id}"`,
-    });
-    return true;
-  }
-
-  async count(): Promise<number> {
-    await this.ensureInitialized();
-    const stats = await this.client.getCollectionStatistics({
-      collection_name: this.collectionName,
-    });
-    // Milvus returns stats in data property
-    const rowCount = stats.data?.row_count;
-    // Handle different types: string, number, or undefined
-    if (typeof rowCount === "number") {
-      return rowCount;
-    }
-    if (typeof rowCount === "string") {
-      return parseInt(rowCount, 10);
-    }
-    return 0;
-  }
-}
-
-// ============================================================================
-// Embeddings Provider (OpenAI, Ollama, Custom)
-// ============================================================================
-
-class Embeddings {
-  private client: OpenAI;
-  private provider: EmbeddingProvider;
-
-  constructor(
-    provider: EmbeddingProvider,
-    apiKey: string | undefined,
-    private model: string,
-    baseUrl: string,
-    private dimensions?: number,
-  ) {
-    this.provider = provider;
-    // For Ollama and custom, apiKey can be "dummy" or undefined
-    const effectiveApiKey = apiKey || "dummy";
-    this.client = new OpenAI({ apiKey: effectiveApiKey, baseURL: baseUrl });
-  }
-
-  async embed(text: string): Promise<number[]> {
-    const params: { model: string; input: string; dimensions?: number } = {
-      model: this.model,
-      input: text,
-    };
-
-    // Only add dimensions parameter for OpenAI
-    if (this.provider === "openai" && this.dimensions) {
-      params.dimensions = this.dimensions;
-    }
-
-    const response = await this.client.embeddings.create(params);
-    return response.data[0].embedding;
-  }
-}
 
 // ============================================================================
 // Rule-based capture filter
@@ -419,12 +144,12 @@ export function detectCategory(text: string): MemoryCategory {
 const memoryPlugin = {
   id: "memory-milvus",
   name: "Memory (Milvus)",
-  description: "Milvus-backed long-term memory with auto-recall/capture",
+  description: "Milvus-backed long-term memory with auto-recall/capture and core memory search",
   kind: "memory" as const,
   configSchema: memoryConfigSchema,
 
   register(api: OpenClawPluginApi) {
-    const cfg = memoryConfigSchema.parse(api.pluginConfig);
+    const cfg = memoryConfigSchema.parse(api.pluginConfig) as MemoryConfig;
 
     const milvusHost = cfg.milvus?.host ?? DEFAULT_MILVUS_HOST;
     const milvusPort = cfg.milvus?.port ?? DEFAULT_MILVUS_PORT;
@@ -448,12 +173,22 @@ const memoryPlugin = {
       dimensions,
     );
 
+    // Initialize file indexer if core memory is enabled
+    let fileIndexer: FileIndexer | undefined;
+    if (cfg.core?.enabled) {
+      fileIndexer = new FileIndexer(db, embeddings, cfg.core, api.logger);
+      // Initialize file indexing in background
+      fileIndexer.initialize().catch((err) => {
+        api.logger.error(`file-indexer: initialization failed: ${err}`);
+      });
+    }
+
     api.logger.info(
-      `memory-milvus: plugin registered (provider: ${provider}, model: ${model}, milvus: ${milvusHost}:${milvusPort}, collection: ${collectionName}, lazy init)`,
+      `memory-milvus: plugin registered (provider: ${provider}, model: ${model}, milvus: ${milvusHost}:${milvusPort}, collection: ${collectionName}, core: ${cfg.core?.enabled ? "enabled" : "disabled"})`,
     );
 
     // ========================================================================
-    // Tools
+    // Plugin Layer Tools (memory_recall, memory_store, memory_forget)
     // ========================================================================
 
     api.registerTool(
@@ -470,7 +205,7 @@ const memoryPlugin = {
           const { query, limit = 5 } = params as { query: string; limit?: number };
 
           const vector = await embeddings.embed(query);
-          const results = await db.search(vector, limit, 0.1);
+          const results = await db.searchConversations(vector, limit, 0.1);
 
           if (results.length === 0) {
             return {
@@ -527,13 +262,13 @@ const memoryPlugin = {
           } = params as {
             text: string;
             importance?: number;
-            category?: MemoryEntry["category"];
+            category?: ConversationMemoryEntry["category"];
           };
 
           const vector = await embeddings.embed(text);
 
           // Check for duplicates
-          const existing = await db.search(vector, 1, 0.95);
+          const existing = await db.searchConversations(vector, 1, 0.95);
           if (existing.length > 0) {
             return {
               content: [
@@ -550,7 +285,7 @@ const memoryPlugin = {
             };
           }
 
-          const entry = await db.store({
+          const entry = await db.storeConversation({
             text,
             vector,
             importance,
@@ -579,7 +314,7 @@ const memoryPlugin = {
           const { query, memoryId } = params as { query?: string; memoryId?: string };
 
           if (memoryId) {
-            await db.delete(memoryId);
+            await db.deleteConversation(memoryId);
             return {
               content: [{ type: "text", text: `Memory ${memoryId} forgotten.` }],
               details: { action: "deleted", id: memoryId },
@@ -588,7 +323,7 @@ const memoryPlugin = {
 
           if (query) {
             const vector = await embeddings.embed(query);
-            const results = await db.search(vector, 5, 0.7);
+            const results = await db.searchConversations(vector, 5, 0.7);
 
             if (results.length === 0) {
               return {
@@ -598,7 +333,7 @@ const memoryPlugin = {
             }
 
             if (results.length === 1 && results[0].score > 0.9) {
-              await db.delete(results[0].entry.id);
+              await db.deleteConversation(results[0].entry.id);
               return {
                 content: [{ type: "text", text: `Forgotten: "${results[0].entry.text}"` }],
                 details: { action: "deleted", id: results[0].entry.id },
@@ -612,7 +347,7 @@ const memoryPlugin = {
             const sanitizedCandidates = results.map((r) => ({
               id: r.entry.id,
               text: r.entry.text,
-              category:              r.entry.category,
+              category: r.entry.category,
               score: r.score,
             }));
 
@@ -637,6 +372,24 @@ const memoryPlugin = {
     );
 
     // ========================================================================
+    // Core Layer Tools (memory_search, memory_get)
+    // ========================================================================
+
+    if (cfg.core?.enabled) {
+      api.registerTool(
+        createMemorySearchTool(db, embeddings, cfg.core),
+        { name: "memory_search" },
+      );
+
+      api.registerTool(
+        createMemoryGetTool(api),
+        { name: "memory_get" },
+      );
+
+      api.logger.info("memory-milvus: core layer tools registered (memory_search, memory_get)");
+    }
+
+    // ========================================================================
     // CLI Commands
     // ========================================================================
 
@@ -646,20 +399,28 @@ const memoryPlugin = {
 
         memory
           .command("list")
-          .description("List memories")
+          .description("List conversation memories")
           .action(async () => {
-            const count = await db.count();
-            console.log(`Total memories: ${count}`);
+            const count = await db.countConversations();
+            console.log(`Total conversation memories: ${count}`);
+          });
+
+        memory
+          .command("list-files")
+          .description("List file memories")
+          .action(async () => {
+            const count = await db.countFiles();
+            console.log(`Total file memories: ${count}`);
           });
 
         memory
           .command("search")
-          .description("Search memories")
+          .description("Search conversation memories")
           .argument("<query>", "Search query")
           .option("--limit <n>", "Max results", "5")
           .action(async (query, opts) => {
             const vector = await embeddings.embed(query);
-            const results = await db.search(vector, parseInt(opts.limit), 0.3);
+            const results = await db.searchConversations(vector, parseInt(opts.limit), 0.3);
             const output = results.map((r) => ({
               id: r.entry.id,
               text: r.entry.text,
@@ -671,11 +432,33 @@ const memoryPlugin = {
           });
 
         memory
+          .command("search-files")
+          .description("Search file memories")
+          .argument("<query>", "Search query")
+          .option("--limit <n>", "Max results", "5")
+          .action(async (query, opts) => {
+            const vector = await embeddings.embed(query);
+            const results = await db.searchFiles(vector, parseInt(opts.limit), 0.3);
+            const output = results.map((r) => ({
+              id: r.entry.id,
+              text: r.entry.text,
+              path: r.entry.path,
+              lineStart: r.entry.lineStart,
+              lineEnd: r.entry.lineEnd,
+              score: r.score,
+            }));
+            console.log(JSON.stringify(output, null, 2));
+          });
+
+        memory
           .command("stats")
           .description("Show memory statistics")
           .action(async () => {
-            const count = await db.count();
-            console.log(`Total memories: ${count}`);
+            const convCount = await db.countConversations();
+            const fileCount = await db.countFiles();
+            console.log(`Conversation memories: ${convCount}`);
+            console.log(`File memories: ${fileCount}`);
+            console.log(`Total: ${convCount + fileCount}`);
           });
       },
       { commands: ["milvus-mem"] },
@@ -694,7 +477,7 @@ const memoryPlugin = {
 
         try {
           const vector = await embeddings.embed(event.prompt);
-          const results = await db.search(vector, 3, 0.3);
+          const results = await db.searchConversations(vector, 3, 0.3);
 
           if (results.length === 0) {
             return;
@@ -776,12 +559,12 @@ const memoryPlugin = {
             const vector = await embeddings.embed(text);
 
             // Check for duplicates (high similarity threshold)
-            const existing = await db.search(vector, 1, 0.95);
+            const existing = await db.searchConversations(vector, 1, 0.95);
             if (existing.length > 0) {
               continue;
             }
 
-            await db.store({
+            await db.storeConversation({
               text,
               vector,
               importance: 0.7,
@@ -807,7 +590,7 @@ const memoryPlugin = {
       id: "memory-milvus",
       start: () => {
         api.logger.info(
-          `memory-milvus: initialized (provider: ${provider}, model: ${model}, milvus: ${milvusHost}:${milvusPort}, collection: ${collectionName})`,
+          `memory-milvus: initialized (provider: ${provider}, model: ${model}, milvus: ${milvusHost}:${milvusPort}, collection: ${collectionName}, core: ${cfg.core?.enabled ? "enabled" : "disabled"})`,
         );
       },
       stop: () => {

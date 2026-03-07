@@ -44,6 +44,30 @@ export type MemoryConfig = {
   autoCapture?: boolean;
   autoRecall?: boolean;
   captureMaxChars?: number;
+  core?: CoreMemoryConfig;
+};
+
+export type CoreMemoryConfig = {
+  enabled?: boolean;
+  chunkSize?: number;
+  chunkOverlap?: number;
+  watchPaths?: string[];
+  search: {
+    hybrid: {
+      enabled?: boolean;
+      vectorWeight?: number;
+      textWeight?: number;
+      candidateMultiplier?: number;
+    };
+    mmr: {
+      enabled?: boolean;
+      lambda?: number;
+    };
+    temporalDecay: {
+      enabled?: boolean;
+      halfLifeDays?: number;
+    };
+  };
 };
 
 // ============================================================================
@@ -136,7 +160,7 @@ export const memoryConfigSchema = {
     const cfg = value as Record<string, unknown>;
     assertAllowedKeys(
       cfg,
-      ["embedding", "milvus", "autoCapture", "autoRecall", "captureMaxChars"],
+      ["embedding", "milvus", "autoCapture", "autoRecall", "captureMaxChars", "core"],
       "memory config",
     );
 
@@ -169,6 +193,115 @@ export const memoryConfigSchema = {
       throw new Error("captureMaxChars must be between 100 and 10000");
     }
 
+    // Parse core config if present
+    let coreConfig: CoreMemoryConfig | undefined;
+    if (cfg.core) {
+      const core = cfg.core as Record<string, unknown>;
+      assertAllowedKeys(
+        core,
+        ["enabled", "chunkSize", "chunkOverlap", "watchPaths", "search"],
+        "core config",
+      );
+
+      // Parse search config
+      let searchConfig: CoreMemoryConfig["search"];
+      if (core.search) {
+        const search = core.search as Record<string, unknown>;
+        assertAllowedKeys(
+          search,
+          ["hybrid", "mmr", "temporalDecay"],
+          "search config",
+        );
+
+        // Parse hybrid config
+        let hybridConfig: CoreMemoryConfig["search"]["hybrid"];
+        if (search.hybrid) {
+          const hybrid = search.hybrid as Record<string, unknown>;
+          assertAllowedKeys(
+            hybrid,
+            ["enabled", "vectorWeight", "textWeight", "candidateMultiplier"],
+            "hybrid config",
+          );
+          hybridConfig = {
+            enabled: hybrid.enabled === true,
+            vectorWeight: typeof hybrid.vectorWeight === "number" ? hybrid.vectorWeight : 0.7,
+            textWeight: typeof hybrid.textWeight === "number" ? hybrid.textWeight : 0.3,
+            candidateMultiplier: typeof hybrid.candidateMultiplier === "number" ? hybrid.candidateMultiplier : 4,
+          };
+        } else {
+          hybridConfig = {
+            enabled: true,
+            vectorWeight: 0.7,
+            textWeight: 0.3,
+            candidateMultiplier: 4,
+          };
+        }
+
+        // Parse MMR config
+        let mmrConfig: CoreMemoryConfig["search"]["mmr"];
+        if (search.mmr) {
+          const mmr = search.mmr as Record<string, unknown>;
+          assertAllowedKeys(mmr, ["enabled", "lambda"], "mmr config");
+          mmrConfig = {
+            enabled: mmr.enabled === true,
+            lambda: typeof mmr.lambda === "number" ? mmr.lambda : 0.7,
+          };
+        } else {
+          mmrConfig = {
+            enabled: false,
+            lambda: 0.7,
+          };
+        }
+
+        // Parse temporal decay config
+        let temporalDecayConfig: CoreMemoryConfig["search"]["temporalDecay"];
+        if (search.temporalDecay) {
+          const td = search.temporalDecay as Record<string, unknown>;
+          assertAllowedKeys(td, ["enabled", "halfLifeDays"], "temporalDecay config");
+          temporalDecayConfig = {
+            enabled: td.enabled === true,
+            halfLifeDays: typeof td.halfLifeDays === "number" ? td.halfLifeDays : 30,
+          };
+        } else {
+          temporalDecayConfig = {
+            enabled: false,
+            halfLifeDays: 30,
+          };
+        }
+
+        searchConfig = {
+          hybrid: hybridConfig,
+          mmr: mmrConfig,
+          temporalDecay: temporalDecayConfig,
+        };
+      } else {
+        searchConfig = {
+          hybrid: {
+            enabled: true,
+            vectorWeight: 0.7,
+            textWeight: 0.3,
+            candidateMultiplier: 4,
+          },
+          mmr: {
+            enabled: false,
+            lambda: 0.7,
+          },
+          temporalDecay: {
+            enabled: false,
+            halfLifeDays: 30,
+          },
+        };
+      }
+
+      coreConfig = {
+        enabled: core.enabled !== false,
+        chunkSize: typeof core.chunkSize === "number" ? core.chunkSize : 400,
+        chunkOverlap: typeof core.chunkOverlap === "number" ? core.chunkOverlap : 80,
+        watchPaths: Array.isArray(core.watchPaths) ? core.watchPaths as string[] : ["MEMORY.md", "memory/"],
+        search: searchConfig,
+      };
+    }
+
     return {
       embedding: {
         provider,
@@ -181,6 +314,7 @@ export const memoryConfigSchema = {
       autoCapture: cfg.autoCapture === true,
       autoRecall: cfg.autoRecall !== false,
       captureMaxChars: captureMaxChars ?? DEFAULT_CAPTURE_MAX_CHARS,
+      core: coreConfig,
     };
   },
   uiHints: {
@@ -240,6 +374,37 @@ export const memoryConfigSchema = {
       help: "Maximum message length eligible for auto-capture",
       advanced: true,
       placeholder: String(DEFAULT_CAPTURE_MAX_CHARS),
+    },
+    "core.enabled": {
+      label: "Core Memory Enabled",
+      help: "Enable core memory search (MEMORY.md + memory/*.md)",
+    },
+    "core.chunkSize": {
+      label: "Chunk Size",
+      help: "Token size for file chunking",
+      advanced: true,
+      placeholder: "400",
+    },
+    "core.chunkOverlap": {
+      label: "Chunk Overlap",
+      help: "Token overlap between chunks",
+      advanced: true,
+      placeholder: "80",
+    },
+    "core.search.hybrid.enabled": {
+      label: "Hybrid Search",
+      help: "Enable hybrid vector + BM25 search",
+      advanced: true,
+    },
+    "core.search.mmr.enabled": {
+      label: "MMR Re-ranking",
+      help: "Enable Maximal Marginal Relevance for diversity",
+      advanced: true,
+    },
+    "core.search.temporalDecay.enabled": {
+      label: "Temporal Decay",
+      help: "Enable time-based score decay",
+      advanced: true,
     },
   },
 };

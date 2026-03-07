@@ -2,27 +2,32 @@
   "id": "memory-milvus",
   "kind": "memory",
   "uiHints": {
+    "embedding.provider": {
+      "label": "Embedding Provider",
+      "help": "Provider for embeddings (openai, ollama, custom)",
+      "placeholder": "openai"
+    },
     "embedding.apiKey": {
-      "label": "OpenAI API Key",
+      "label": "API Key",
       "sensitive": true,
       "placeholder": "sk-proj-...",
-      "help": "API key for OpenAI embeddings (or use ${OPENAI_API_KEY})"
+      "help": "API key for OpenAI embeddings (required for openai provider)"
     },
     "embedding.model": {
       "label": "Embedding Model",
       "placeholder": "text-embedding-3-small",
-      "help": "OpenAI embedding model to use"
+      "help": "Model name (e.g., text-embedding-3-small, nomic-embed-text)"
     },
     "embedding.baseUrl": {
       "label": "Base URL",
       "placeholder": "https://api.openai.com/v1",
-      "help": "Base URL for compatible providers (e.g. http://localhost:11434/v1)",
+      "help": "Base URL for embeddings API (default varies by provider)",
       "advanced": true
     },
     "embedding.dimensions": {
       "label": "Dimensions",
       "placeholder": "1536",
-      "help": "Vector dimensions for custom models (required for non-standard models)",
+      "help": "Vector dimensions (required for custom models)",
       "advanced": true
     },
     "milvus.host": {
@@ -53,6 +58,37 @@
       "help": "Maximum message length eligible for auto-capture",
       "advanced": true,
       "placeholder": "500"
+    },
+    "core.enabled": {
+      "label": "Core Memory Enabled",
+      "help": "Enable core memory search (MEMORY.md + memory/*.md)"
+    },
+    "core.chunkSize": {
+      "label": "Chunk Size",
+      "help": "Token size for file chunking",
+      "advanced": true,
+      "placeholder": "400"
+    },
+    "core.chunkOverlap": {
+      "label": "Chunk Overlap",
+      "help": "Token overlap between chunks",
+      "advanced": true,
+      "placeholder": "80"
+    },
+    "core.search.hybrid.enabled": {
+      "label": "Hybrid Search",
+      "help": "Enable hybrid vector + BM25 search",
+      "advanced": true
+    },
+    "core.search.mmr.enabled": {
+      "label": "MMR Re-ranking",
+      "help": "Enable Maximal Marginal Relevance for diversity",
+      "advanced": true
+    },
+    "core.search.temporalDecay.enabled": {
+      "label": "Temporal Decay",
+      "help": "Enable time-based score decay",
+      "advanced": true
     }
   },
   "configSchema": {
@@ -63,6 +99,10 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "provider": {
+            "type": "string",
+            "enum": ["openai", "ollama", "custom"]
+          },
           "apiKey": {
             "type": "string"
           },
@@ -75,8 +115,7 @@
           "dimensions": {
             "type": "number"
           }
-        },
-        "required": ["apiKey"]
+        }
       },
       "milvus": {
         "type": "object",
@@ -109,6 +148,89 @@
         "type": "number",
         "minimum": 100,
         "maximum": 10000
+      },
+      "core": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "chunkSize": {
+            "type": "number",
+            "minimum": 100,
+            "maximum": 2000
+          },
+          "chunkOverlap": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 500
+          },
+          "watchPaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "search": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "hybrid": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "vectorWeight": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "textWeight": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "candidateMultiplier": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 10
+                  }
+                }
+              },
+              "mmr": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "lambda": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                }
+              },
+              "temporalDecay": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "halfLifeDays": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 365
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "required": ["embedding"]
