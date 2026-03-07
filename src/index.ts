@@ -38,7 +38,7 @@ const memoryMilvusPlugin = {
     // Initialize Milvus client with agent-specific collection
     const manager = new MilvusMemoryManager({
       address: cfg.milvus.address,
-      baseCollectionName: cfg.milvus.collectionName,
+      prefix: cfg.milvus.prefix,
       agentId,
       vectorDim: cfg.embedding.dimensions || 1536, // Default for text-embedding-3-small
       username: cfg.milvus.username,
@@ -314,7 +314,7 @@ const memoryMilvusPlugin = {
       id: "memory-milvus",
       start: async () => {
         api.logger.info?.(
-          `memory-milvus: initializing (address: ${cfg.milvus.address}, collection: ${cfg.milvus.collectionName})`,
+          `memory-milvus: initializing (address: ${cfg.milvus.address}, prefix: ${cfg.milvus.prefix})`,
         );
 
         // Initialize Milvus

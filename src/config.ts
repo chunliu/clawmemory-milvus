@@ -11,9 +11,9 @@ export const milvusConfigSchema = Type.Object({
       description: "Milvus server address (e.g., 'localhost:19530')",
       default: "localhost:19530",
     }),
-    collectionName: Type.String({
-      description: "Base collection name (agent ID will be appended)",
-      default: "openclaw_memory",
+    prefix: Type.String({
+      description: "Collection name prefix (format: {prefix}-{agentId})",
+      default: "openclaw-memory",
     }),
     username: Type.Optional(Type.String({
       description: "Milvus username (if auth enabled)",

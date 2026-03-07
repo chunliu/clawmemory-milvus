@@ -21,7 +21,7 @@ npm install openclaw-plugin-memory-milvus
 
 ## Configuration
 
-Add to your OpenClux config:
+Add to your OpenClaw config:
 
 ```json
 {
@@ -33,7 +33,7 @@ Add to your OpenClux config:
       "memory-milvus": {
         "milvus": {
           "address": "localhost:19530",
-          "collectionName": "openclaw_memory",
+          "prefix": "openclaw-memory",
           "username": "",
           "password": ""
         },
@@ -145,10 +145,11 @@ openclaw memory sync
 
 Each OpenClaw agent gets its own Milvus collection:
 
-- **Collection Naming**: `{baseCollectionName}_{agentId}`
-- **Example**: `openclaw_memory_agent1`, `openclaw_memory_agent2`
+- **Collection Naming**: `{prefix}-{agentId}`
+- **Example**: `openclaw-memory-agent1`, `openclaw-memory-agent2`
 - **Isolation**: Complete data separation between agents
 - **Security**: Agents cannot access each other's memory
+- **Customizable Prefix**: Configure via `milvus.prefix` in config
 
 This mirrors OpenClaw's SQLite implementation where each agent has its own database file.
 

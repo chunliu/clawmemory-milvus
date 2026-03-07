@@ -8,7 +8,7 @@ import type { Chunk, MemorySource, MemoryProviderStatus } from "./types.js";
 
 export interface MilvusClientConfig {
   address: string;
-  baseCollectionName: string;
+  prefix: string;
   agentId: string;
   vectorDim: number;
   username?: string;
@@ -17,7 +17,7 @@ export interface MilvusClientConfig {
 
 export class MilvusMemoryManager {
   private client: MilvusClient;
-  private baseCollectionName: string;
+  private prefix: string;
   private agentId: string;
   private collectionName: string;
   private vectorDim: number;
@@ -36,24 +36,26 @@ export class MilvusMemoryManager {
       username: config.username,
       password: config.password,
     });
-    this.baseCollectionName = config.baseCollectionName;
+    this.prefix = config.prefix;
     this.agentId = config.agentId;
-    this.collectionName = this.buildCollectionName(config.baseCollectionName, config.agentId);
+    this.collectionName = this.buildCollectionName(config.prefix, config.agentId);
     this.vectorDim = config.vectorDim;
   }
 
   /**
    * Build agent-specific collection name
-   * Format: {baseCollectionName}_{agentId}
+   * Format: {prefix}-{agentId}
    * Sanitizes agent ID to be Milvus-compatible
    */
-  private buildCollectionName(baseName: string, agentId: string): string {
-    // Sanitize agent ID: replace special chars with underscores, limit length
+  private buildCollectionName(prefix: string: string, agentId: string): string {
+    // Sanitize agent ID: replace special chars with hyphens, limit length
     const sanitized = agentId
       .toLowerCase()
-      .replace(/[^a-z0-9_-]/g, "_")
+      .replace(/[^a-z0-9_-]/g, "-")
+      .replace(/-+/g, "-")  // Replace multiple hyphens with single
+      .replace(/^-|-$/g, "") // Remove leading/trailing hyphens
       .substring(0, 32);
-    return `${baseName}_${sanitized}`;
+    return `${prefix}-${sanitized}`;
   }
 
   /**
