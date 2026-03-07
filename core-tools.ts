@@ -146,6 +146,7 @@ export function createMemorySearchTool(
   db: MemoryDB,
   embeddings: Embeddings,
   config: CoreMemoryConfig,
+  agentId?: string,
 ) {
   return {
     name: "memory_search",
@@ -180,11 +181,12 @@ export function createMemorySearchTool(
         // Generate query vector
         const queryVector = await embeddings.embed(query);
 
-        // Search in Milvus
+        // Search in Milvus (with agentId filter if provided)
         const results = await db.searchFiles(
           queryVector,
           maxResults * (config.search.hybrid.candidateMultiplier || 4),
           minScore,
+          agentId,
         );
 
         if (results.length === 0) {

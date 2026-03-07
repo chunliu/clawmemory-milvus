@@ -28,6 +28,7 @@ export interface ConversationMemoryEntry {
   importance: number;
   category: "preference" | "decision" | "entity" | "fact" | "other";
   createdAt: number;
+  agentId?: string;  // Agent identifier for isolation
 }
 
 export interface FileMemoryEntry {
@@ -40,6 +41,7 @@ export interface FileMemoryEntry {
   category: "file";
   createdAt: number;
   isEvergreen: boolean;
+  agentId?: string;  // Agent identifier for isolation
 }
 
 export interface MemorySearchResult<T> {
@@ -169,6 +171,12 @@ export class MemoryDB {
           description: "Creation timestamp",
           data_type: DataType.Int64,
         },
+        {
+          name: "agentId",
+          description: "Agent identifier for isolation",
+          data_type: DataType.VarChar,
+          max_length: 100,
+        },
       ];
     } else {
       // File collection
@@ -224,6 +232,12 @@ export class MemoryDB {
           name: "isEvergreen",
           description: "Is evergreen content",
           data_type: DataType.Bool,
+        },
+        {
+          name: "agentId",
+          description: "Agent identifier for isolation",
+          data_type: DataType.VarChar,
+          max_length: 100,
         },
       ];
     }
@@ -281,6 +295,7 @@ export class MemoryDB {
           importance: fullEntry.importance,
           category: fullEntry.category,
           createdAt: fullEntry.createdAt,
+          agentId: fullEntry.agentId,
         },
       ],
     });
@@ -292,15 +307,27 @@ export class MemoryDB {
     return fullEntry;
   }
 
-  async searchConversations(vector: number[], limit = 5, minScore = 0.5): Promise<MemorySearchResult<ConversationMemoryEntry>[]> {
+  async searchConversations(
+    vector: number[],
+    limit = 5,
+    minScore = 0.5,
+    agentId?: string,
+  ): Promise<MemorySearchResult<ConversationMemoryEntry>[]> {
     await this.ensureInitialized();
 
-    const results = await this.client.search({
+    const searchParams: any = {
       collection_name: this.conversationCollectionName,
       data: [vector],
       limit,
-      output_fields: ["text", "importance", "category", "createdAt"],
-    });
+      output_fields: ["text", "importance", "category", "createdAt", "agentId"],
+    };
+
+    // Add filter expression for agentId if provided
+    if (agentId) {
+      searchParams.filter = `agentId == "${agentId}"`;
+    }
+
+    const results = await this.client.search(searchParams);
 
     if (!results || !results.results || results.results.length === 0) {
       return [];
@@ -314,6 +341,7 @@ export class MemoryDB {
         importance: result.importance || 0,
         category: result.category || "other",
         createdAt: result.createdAt || Date.now(),
+        agentId: result.agentId,
       },
       score: result.score || 0,
     }));
@@ -375,6 +403,7 @@ export class MemoryDB {
           category: fullEntry.category,
           createdAt: fullEntry.createdAt,
           isEvergreen: fullEntry.isEvergreen,
+          agentId: fullEntry.agentId,
         },
       ],
     });
@@ -386,15 +415,27 @@ export class MemoryDB {
     return fullEntry;
   }
 
-  async searchFiles(vector: number[], limit = 5, minScore = 0.5): Promise<MemorySearchResult<FileMemoryEntry>[]> {
+  async searchFiles(
+    vector: number[],
+    limit = 5,
+    minScore = 0.5,
+    agentId?: string,
+  ): Promise<MemorySearchResult<FileMemoryEntry>[]> {
     await this.ensureInitialized();
 
-    const results = await this.client.search({
+    const searchParams: any = {
       collection_name: this.fileCollectionName,
       data: [vector],
       limit,
-      output_fields: ["text", "path", "lineStart", "lineEnd", "category", "createdAt", "isEvergreen"],
-    });
+      output_fields: ["text", "path", "lineStart", "lineEnd", "category", "createdAt", "isEvergreen", "agentId"],
+    };
+
+    // Add filter expression for agentId if provided
+    if (agentId) {
+      searchParams.filter = `agentId == "${agentId}"`;
+    }
+
+    const results = await this.client.search(searchParams);
 
     if (!results || !results.results || results.results.length === 0) {
       return [];
@@ -411,6 +452,7 @@ export class MemoryDB {
         category: result.category || "file",
         createdAt: result.createdAt || Date.now(),
         isEvergreen: result.isEvergreen || false,
+        agentId: result.agentId,
       },
       score: result.score || 0,
     }));

@@ -2,7 +2,7 @@
  * File Indexer
  *
  * Watches and indexes MEMORY.md and memory/*.md files into Milvus.
- * Chunks files, generates embeddings, and stores in the file collection.
+ * Chunks files, generates embeddings, and stores in file collection.
  */
 
 import { promises as fs } from "node:fs";
@@ -131,6 +131,7 @@ export class FileIndexer {
     private embeddings: Embeddings,
     config: CoreMemoryConfig,
     private logger: any,
+    private agentId?: string,
   ) {
     this.watchPaths = config.watchPaths || ["MEMORY.md", "memory/"];
     this.chunkSize = config.chunkSize || 400;
@@ -138,23 +139,23 @@ export class FileIndexer {
   }
 
   /**
-   * Initialize the indexer (index all files)
+   * Initialize indexer (index all files)
    */
-  async initialize(): Promise<void> {
+  async initialize(workspace?: string): Promise<void> {
     this.logger.info("file-indexer: initializing");
 
-    // Get workspace path
-    const workspace = process.env.HOME
+    // Get workspace path (agent-specific if provided)
+    const resolvedWorkspace = workspace || (process.env.HOME
       ? `${process.env.HOME}/.openclaw/workspace`
-      : "/tmp/openclaw-workspace";
+      : "/tmp/openclaw-workspace");
 
     // Find all files to index
-    const filesToIndex = await this.findFilesToIndex(workspace);
+    const filesToIndex = await this.findFilesToIndex(resolvedWorkspace);
     this.logger.info(`file-indexer: found ${filesToIndex.length} files to index`);
 
     // Index each file
     for (const file of filesToIndex) {
-      await this.indexFile(file);
+      await this.indexFile(file, resolvedWorkspace);
     }
 
     this.logger.info("file-indexer: initialization complete");
@@ -191,18 +192,18 @@ export class FileIndexer {
   /**
    * Index a single file
    */
-  async indexFile(path: string): Promise<void> {
-    // Get workspace path
-    const workspace = process.env.HOME
+  async indexFile(path: string, workspace?: string): Promise<void> {
+    // Get workspace path (agent-specific if provided)
+    const resolvedWorkspace = workspace || (process.env.HOME
       ? `${process.env.HOME}/.openclaw/workspace`
-      : "/tmp/openclaw-workspace";
-    const fullPath = `${workspace}/${path}`;
+      : "/tmp/openclaw-workspace");
+    const fullPath = `${resolvedWorkspace}/${path}`;
 
     try {
       // Read file content
       const content = await fs.readFile(fullPath, "utf-8");
 
-      // Chunk the file
+      // Chunk file
       const chunks = chunkFile(content, path, this.chunkSize, this.chunkOverlap);
       this.logger.info(`file-indexer: chunked ${path} into ${chunks.length} chunks`);
 
@@ -223,6 +224,7 @@ export class FileIndexer {
           lineEnd: chunk.lineEnd,
           category: "file",
           isEvergreen: chunk.isEvergreen,
+          agentId: this.agentId,
         });
       }
 
@@ -254,6 +256,7 @@ export class FileIndexer {
       for (const path of this.indexQueue) {
         await this.indexFile(path);
         this.indexQueue.delete(path);
+);
       }
     } finally {
       this.indexing = false;
