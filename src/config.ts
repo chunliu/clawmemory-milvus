@@ -12,7 +12,7 @@ export const milvusConfigSchema = Type.Object({
       default: "localhost:19530",
     }),
     collectionName: Type.String({
-      description: "Milvus collection name",
+      description: "Base collection name (agent ID will be appended)",
       default: "openclaw_memory",
     }),
     username: Type.Optional(Type.String({

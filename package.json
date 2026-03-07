@@ -1,5 +1,5 @@
 {
-  "name": "openclaw-plugin-memory-milvus",
+  "name": "memory-milvus",
   "version": "0.1.0",
   "description": "Milvus-backed memory plugin for OpenClaw with hybrid search (vector + BM25)",
   "type": "module",

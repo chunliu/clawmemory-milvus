@@ -31,10 +31,15 @@ const memoryMilvusPlugin = {
     // Resolve workspace directory
     const workspaceDir = api.resolvePath(".");
 
-    // Initialize Milvus client
+    // Get agent ID from session key (OpenClaw provides this)
+    // Format: "agent:{agentId}" or similar
+    const agentId = api.sessionKey?.split(":")[1] || "default";
+
+    // Initialize Milvus client with agent-specific collection
     const manager = new MilvusMemoryManager({
       address: cfg.milvus.address,
-      collectionName: cfg.milvus.collectionName,
+      baseCollectionName: cfg.milvus.collectionName,
+      agentId,
       vectorDim: cfg.embedding.dimensions || 1536, // Default for text-embedding-3-small
       username: cfg.milvus.username,
       password: cfg.milvus.password,
@@ -247,6 +252,8 @@ const memoryMilvusPlugin = {
           .description("Show memory status")
           .action(async () => {
             const status = manager.getStatus();
+            console.log(`Agent ID: ${agentId}`);
+            console.log(`Collection: ${manager.getCollectionName()}`);
             console.log(JSON.stringify(status, null, 2));
           });
 

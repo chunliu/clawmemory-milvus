@@ -8,7 +8,8 @@ import type { Chunk, MemorySource, MemoryProviderStatus } from "./types.js";
 
 export interface MilvusClientConfig {
   address: string;
-  collectionName: string;
+  baseCollectionName: string;
+  agentId: string;
   vectorDim: number;
   username?: string;
   password?: string;
@@ -16,6 +17,8 @@ export interface MilvusClientConfig {
 
 export class MilvusMemoryManager {
   private client: MilvusClient;
+  private baseCollectionName: string;
+  private agentId: string;
   private collectionName: string;
   private vectorDim: number;
   private initialized = false;
@@ -33,8 +36,31 @@ export class MilvusMemoryManager {
       username: config.username,
       password: config.password,
     });
-    this.collectionName = config.collectionName;
+    this.baseCollectionName = config.baseCollectionName;
+    this.agentId = config.agentId;
+    this.collectionName = this.buildCollectionName(config.baseCollectionName, config.agentId);
     this.vectorDim = config.vectorDim;
+  }
+
+  /**
+   * Build agent-specific collection name
+   * Format: {baseCollectionName}_{agentId}
+   * Sanitizes agent ID to be Milvus-compatible
+   */
+  private buildCollectionName(baseName: string, agentId: string): string {
+    // Sanitize agent ID: replace special chars with underscores, limit length
+    const sanitized = agentId
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, "_")
+      .substring(0, 32);
+    return `${baseName}_${sanitized}`;
+  }
+
+  /**
+   * Get the collection name for this agent
+   */
+  getCollectionName(): string {
+    return this.collectionName;
   }
 
   async initialize(): Promise<void> {

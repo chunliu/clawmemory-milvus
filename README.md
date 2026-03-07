@@ -6,6 +6,7 @@ Milvus-backed memory plugin for OpenClaw with hybrid search (vector + BM25).
 
 - **Hybrid Search**: Combines vector similarity search with BM25 keyword search
 - **Milvus Backend**: Uses Milvus vector database for scalable storage and search
+- **Multi-Agent Isolation**: Each agent gets its own Milvus collection
 - **Multiple Embedding Providers**: Supports OpenAI, Gemini, Voyage, Mistral, Ollama
 - **MMR Re-ranking**: Maximal Marginal Relevance for diverse results
 - **Temporal Decay**: Boosts recent memories, decays old ones
@@ -20,7 +21,7 @@ npm install openclaw-plugin-memory-milvus
 
 ## Configuration
 
-Add to your OpenClaw config:
+Add to your OpenClux config:
 
 ```json
 {
@@ -125,6 +126,7 @@ openclaw memory sync
                │
 ┌──────────────┴──────────────────────┐
 │      Milvus Memory Manager         │
+│  - Agent-specific collections       │
 │  - Hybrid Search                   │
 │  - File Sync                       │
 │  - File Watching                   │
@@ -132,11 +134,23 @@ openclaw memory sync
                │
 ┌──────────────┴──────────────────────┐
 │         Milvus Server               │
+│  - Collection per agent             │
 │  - Vector Search (HNSW)            │
 │  - BM25 Search                      │
 │  - Hybrid Search API                │
 └─────────────────────────────────────┘
 ```
+
+## Multi-Agent Isolation
+
+Each OpenClaw agent gets its own Milvus collection:
+
+- **Collection Naming**: `{baseCollectionName}_{agentId}`
+- **Example**: `openclaw_memory_agent1`, `openclaw_memory_agent2`
+- **Isolation**: Complete data separation between agents
+- **Security**: Agents cannot access each other's memory
+
+This mirrors OpenClaw's SQLite implementation where each agent has its own database file.
 
 ## License
 
